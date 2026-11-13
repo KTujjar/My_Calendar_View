@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My Calendar</title>
+  <link rel="icon" href="icons/icon32.png">
+  <link rel="stylesheet" href="view.css">
+</head>
+<body>
+  <header class="toolbar">
+    <div class="tb-left">
+      <button id="btnToday" class="btn" title="Today (T)">Today</button>
+      <div class="nav">
+        <button id="btnPrev" class="btn icon" title="Previous (←)" aria-label="Previous">&#8249;</button>
+        <button id="btnNext" class="btn icon" title="Next (→)" aria-label="Next">&#8250;</button>
+      </div>
+      <h1 id="rangeTitle"></h1>
+    </div>
+    <div class="tb-right">
+      <span id="status" class="status"></span>
+      <button id="btnRefresh" class="btn icon" title="Refresh (R)" aria-label="Refresh">&#8635;</button>
+      <div class="seg" role="tablist">
+        <button id="btnDay" class="seg-btn" title="Day view (D)">Day</button>
+        <button id="btnWeek" class="seg-btn" title="Week view (W)">Week</button>
+      </div>
+      <button id="btnNew" class="btn primary" title="Create an event in Google Calendar">+ New</button>
+      <button id="btnSettings" class="btn icon" title="Settings" aria-label="Settings">&#9881;</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <main id="main">
+    <div id="calendar" class="calendar"></div>
+    <section id="welcome" class="welcome" hidden>
+      <h2>Connect your Google Calendar</h2>
+      <ol>
+        <li>Open <a href="https://calendar.google.com/calendar/r/settings" target="_blank" rel="noopener">Google Calendar settings</a>.</li>
+        <li>In the left sidebar under <b>Settings for my calendars</b>, click your calendar.</li>
+        <li>Scroll to <b>Integrate calendar</b> and copy the <b>Secret address in iCal format</b>.</li>
+        <li>Paste it below. It's stored only in this browser.</li>
+      </ol>
+      <form id="welcomeForm" class="add-row">
+        <input id="welcomeUrl" type="url" placeholder="https://calendar.google.com/calendar/ical/…/private-…/basic.ics" required>
+        <button class="btn primary" type="submit">Connect</button>
+      </form>
+      <p class="hint">Treat this link like a password: anyone who has it can see your calendar.</p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Double-click an empty slot to create an event · Click an event for details</span>
+    <span class="keys">T today · ← → move · D/W view · R refresh</span>
+  </footer>
+
+  <div id="popover" class="popover" hidden></div>
+
+  <div id="settingsBackdrop" class="backdrop" hidden>
+    <div class="dialog" role="dialog" aria-labelledby="settingsTitle">
+      <div class="dialog-head">
+        <h2 id="settingsTitle">Settings</h2>
+        <button id="btnCloseSettings" class="btn icon" aria-label="Close">&#10005;</button>
+      </div>
+
+      <h3>Calendars</h3>
+      <div id="calList" class="cal-list"></div>
+      <form id="addCalForm" class="add-row">
+        <input id="addCalUrl" type="url" placeholder="Paste another secret iCal address" required>
+        <button class="btn" type="submit">Add</button>
+      </form>
+
+      <h3>Hours shown</h3>
+      <div class="row">
+        <label>From <select id="setStart"></select></label>
+        <label>to <select id="setEnd"></select></label>
+      </div>
+      <label class="check"><input id="setFit" type="checkbox"> Fit the whole range on screen (no scrolling)</label>
+
+      <h3>Week</h3>
+      <div class="row">
+        <label>Week starts on
+          <select id="setWeekStart">
+            <option value="0">Sunday</option>
+            <option value="1">Monday</option>
+            <option value="6">Saturday</option>
+          </select>
+        </label>
+      </div>
+      <label class="check"><input id="setWeekends" type="checkbox"> Show weekends</label>
+
+      <h3>Google account</h3>
+      <div class="row">
+        <label>Account number <input id="setAccount" type="number" min="0" max="9" step="1"></label>
+      </div>
+      <p class="hint">The number after <code>/u/</code> in your Google Calendar address (calendar.google.com/calendar/u/<b>2</b>/…). Used when opening or creating events.</p>
+
+      <div class="dialog-foot">
+        <button id="btnSaveSettings" class="btn primary">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="lib/ical.min.js"></script>
+  <script src="view.js"></script>
+</body>
+</html>
