@@ -43,6 +43,7 @@
   const meta = new Map();     // calId -> {fetchedAt, error}
   let lastFetch = 0;
   let refreshing = false;
+  let completed = new Set();  // event keys (one per occurrence) marked complete
   let hourPx = SCROLL_HOUR_PX;
   let nowRefs = [];
   let renderedDay = startOfDay(new Date()).getTime();
@@ -297,6 +298,21 @@
     settings.calendars = (settings.calendars || []).map((c) => ({ ...c }));
   }
   async function saveSettings() { await store.set('settings', settings); }
+
+  // ---------- completed events ----------
+  async function loadCompleted() {
+    const saved = await store.get('completed');
+    completed = new Set(Array.isArray(saved) ? saved : []);
+  }
+  async function toggleCompleted(o) {
+    if (completed.has(o.key)) completed.delete(o.key); else completed.add(o.key);
+    const done = completed.has(o.key);
+    for (const node of document.querySelectorAll('[data-key]')) {
+      if (node.dataset.key === o.key) node.classList.toggle('done', done);
+    }
+    await store.set('completed', [...completed]);
+    return done;
+  }
 
   // ---------- rendering ----------
   function visibleDays() {
@@ -564,6 +580,8 @@
     c.appendChild(document.createTextNode(o.title));
     if (o.end <= new Date()) c.classList.add('past');
     if (o.declined) c.classList.add('declined');
+    c.dataset.key = o.key;
+    if (completed.has(o.key)) c.classList.add('done');
     c.title = allDay ? o.title : `${timeRange(o.start, o.end)} · ${o.title}`;
     c.addEventListener('click', (ev) => { ev.stopPropagation(); showPopover(o, c); });
     return c;
@@ -584,6 +602,8 @@
     if (it.clipBottom) b.classList.add('clip-bottom');
     if (o.end <= now) b.classList.add('past');
     if (o.declined) b.classList.add('declined');
+    b.dataset.key = o.key;
+    if (completed.has(o.key)) b.classList.add('done');
 
     const when = timeRange(o.start, o.end);
     if (height < 36) {
@@ -672,6 +692,19 @@
       p.appendChild(d);
     }
     const actions = el('div', 'p-actions');
+    const doneBtn = el('button', 'btn complete');
+    const setDoneLabel = () => {
+      const d = completed.has(o.key);
+      doneBtn.textContent = d ? '↺ Mark incomplete' : '✓ Complete';
+      doneBtn.classList.toggle('is-done', d);
+    };
+    setDoneLabel();
+    doneBtn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      await toggleCompleted(o);
+      setDoneLabel();
+    });
+    actions.appendChild(doneBtn);
     const open = el('a', 'btn primary', 'Open in Google Calendar');
     open.href = eventUrl(o); open.target = '_blank'; open.rel = 'noopener';
     open.style.textDecoration = 'none';
@@ -851,6 +884,7 @@
     fillHourSelects();
     bind();
     await loadSettings();
+    await loadCompleted();
     await loadCached();
     render();
     if (settings.calendars.length) refreshAll();
