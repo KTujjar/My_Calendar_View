@@ -25,6 +25,7 @@
         <button id="btnWeek" class="seg-btn" title="Week view (W)">Week</button>
       </div>
       <button id="btnNew" class="btn primary" title="Create an event in Google Calendar">+ New</button>
+      <button id="btnPomo" class="btn pomo-btn" title="Pomodoro timer (F)" aria-label="Pomodoro timer"><span aria-hidden="true">&#127813;</span><span id="pomoBadge"></span></button>
       <button id="btnSettings" class="btn icon" title="Settings" aria-label="Settings">&#9881;</button>
     </div>
   </header>
@@ -105,7 +106,53 @@
     </div>
   </div>
 
+  <aside id="pomoPanel" class="pomo-panel" hidden aria-label="Pomodoro timer">
+    <div class="pomo-head">
+      <div class="seg pomo-modes" role="tablist">
+        <button class="seg-btn" data-pomo-mode="focus">Focus</button>
+        <button class="seg-btn" data-pomo-mode="short">Short break</button>
+        <button class="seg-btn" data-pomo-mode="long">Long break</button>
+      </div>
+      <button id="pomoClose" class="btn icon" aria-label="Close timer">&#10005;</button>
+    </div>
+    <div id="pomoFlash" class="pomo-flash" hidden></div>
+    <div id="pomoTime" class="pomo-time">25:00</div>
+    <div class="pomo-track"><div id="pomoBar" class="pomo-bar"></div></div>
+    <div class="pomo-actions">
+      <button id="pomoReset" class="btn" title="Reset">Reset</button>
+      <button id="pomoStart" class="btn primary pomo-start">Start</button>
+      <button id="pomoSkip" class="btn" title="Skip to next">Skip &#8594;</button>
+    </div>
+    <button id="pomoStopRing" class="btn pomo-stop" hidden>&#128277; Stop ringing</button>
+    <div class="pomo-cycle">
+      <div id="pomoDots" class="pomo-dots" title="Focus sessions until your long break"></div>
+      <span id="pomoCount" class="pomo-count"></span>
+      <button id="pomoResetCount" class="btn link" title="Reset today's count">reset</button>
+    </div>
+    <details class="pomo-settings">
+      <summary>Timer settings</summary>
+      <div class="pomo-grid">
+        <label>Focus <span><input id="pomoFocusMin" type="number" min="1" max="180"> min</span></label>
+        <label>Short break <span><input id="pomoShortMin" type="number" min="1" max="60"> min</span></label>
+        <label>Long break <span><input id="pomoLongMin" type="number" min="1" max="120"> min</span></label>
+        <label>Long break after <span><input id="pomoEvery" type="number" min="2" max="12"> focus</span></label>
+      </div>
+      <label class="check"><input id="pomoAutoBreaks" type="checkbox"> Start breaks automatically</label>
+      <label class="check"><input id="pomoAutoFocus" type="checkbox"> Start focus automatically after a break</label>
+      <div class="pomo-grid">
+        <label>Ringtone
+          <span><select id="pomoRingtone"></select>
+          <button id="pomoPreview" class="btn icon" type="button" title="Preview" aria-label="Preview ringtone">&#9654;</button></span>
+        </label>
+        <label>Rings <span><input id="pomoRepeats" type="number" min="1" max="10"> times</span></label>
+        <label class="wide">Volume <input id="pomoVolume" type="range" min="0" max="100" step="5"></label>
+      </div>
+      <p class="hint">Shortcuts: <b>F</b> show/hide timer · <b>Space</b> start/pause while it's open. The timer keeps running if you close this tab, and Chrome shows a notification when it ends.</p>
+    </details>
+  </aside>
+
   <script src="lib/ical.min.js"></script>
   <script src="view.js"></script>
+  <script src="pomodoro.js"></script>
 </body>
 </html>

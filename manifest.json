@@ -28,6 +28,13 @@
       "description": "Open My Calendar View"
     }
   },
-  "permissions": ["storage", "unlimitedStorage"],
-  "host_permissions": ["https://calendar.google.com/*"]
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "alarms",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://calendar.google.com/*"
+  ]
 }

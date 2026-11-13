@@ -14,6 +14,9 @@
   --shadow: 0 10px 30px rgba(15, 23, 42, 0.16), 0 2px 6px rgba(15, 23, 42, 0.08);
   --event-text: #1b1f24;
   --done: #1f9d55;
+  --pomo-focus: #e5484d;
+  --pomo-break: #1f9d55;
+  --pomo-long: #2563eb;
   --gutter: 56px;
   --radius: 8px;
   color-scheme: light;
@@ -35,6 +38,9 @@
     --shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
     --event-text: #eef0f3;
     --done: #3fb873;
+    --pomo-focus: #ff6369;
+    --pomo-break: #3fb873;
+    --pomo-long: #5b8def;
     color-scheme: dark;
   }
 }
@@ -222,3 +228,50 @@ main { flex: 1 1 auto; min-height: 0; position: relative; display: flex; }
 }
 .event.pop, .chip.pop { animation: done-pop .45s ease-out; z-index: 4; }
 @media (prefers-reduced-motion: reduce) { .event.pop, .chip.pop { animation: none; } }
+
+/* Pomodoro */
+.pomo-btn { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; font-variant-numeric: tabular-nums; }
+.pomo-btn #pomoBadge:empty { display: none; }
+.pomo-btn #pomoBadge { font-weight: 600; }
+.pomo-btn.running { --pc: var(--pomo-focus); border-color: var(--pc); color: var(--pc); }
+.pomo-btn.running[data-mode="short"] { --pc: var(--pomo-break); }
+.pomo-btn.running[data-mode="long"] { --pc: var(--pomo-long); }
+
+.pomo-panel {
+  --pc: var(--pomo-focus);
+  position: fixed; top: 58px; right: 16px; z-index: 40; width: 340px; max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 74px); overflow: auto;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 14px 16px 12px;
+}
+.pomo-panel[data-mode="short"] { --pc: var(--pomo-break); }
+.pomo-panel[data-mode="long"] { --pc: var(--pomo-long); }
+.pomo-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.pomo-modes .seg-btn { padding: 5px 10px; font-size: 12.5px; }
+.pomo-modes .seg-btn.active { background: color-mix(in srgb, var(--pc) 16%, var(--bg)); color: var(--pc); }
+.pomo-time { font-size: 56px; font-weight: 600; text-align: center; margin: 14px 0 8px; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.pomo-track { height: 5px; border-radius: 3px; background: var(--bg-hover); overflow: hidden; }
+.pomo-bar { height: 100%; width: 0; background: var(--pc); transition: width 1s linear; }
+.pomo-actions { display: flex; justify-content: center; gap: 8px; margin-top: 14px; }
+.pomo-start { min-width: 96px; background: var(--pc); border-color: var(--pc); }
+.pomo-stop { display: block; width: 100%; margin-top: 10px; border-color: var(--pc); color: var(--pc); font-weight: 600; animation: pulse 1s infinite; }
+.pomo-flash { margin-top: 12px; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--pc) 14%, var(--bg)); color: var(--text); font-weight: 600; text-align: center; }
+.pomo-cycle { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 12px; color: var(--muted); }
+.pomo-dots { display: flex; gap: 4px; }
+.pomo-dot { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--pomo-focus); }
+.pomo-dot.filled { background: var(--pomo-focus); }
+.pomo-count { flex: 1; }
+.btn.link { border: 0; background: none; padding: 0; color: var(--faint); font-size: 12px; text-decoration: underline; }
+.pomo-settings { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+.pomo-settings summary { cursor: pointer; color: var(--muted); font-size: 12.5px; font-weight: 600; }
+.pomo-settings .check { display: flex; gap: 8px; align-items: center; margin: 8px 0; font-size: 12.5px; }
+.pomo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; margin: 10px 0; }
+.pomo-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.pomo-grid label > span { display: flex; align-items: center; gap: 6px; color: var(--text); }
+.pomo-grid label.wide { grid-column: 1 / -1; }
+.pomo-grid input[type=number] { width: 56px; }
+.pomo-grid input[type=number], .pomo-grid select {
+  border: 1px solid var(--line-strong); border-radius: 6px; padding: 4px 6px; background: var(--bg);
+}
+.pomo-grid select { flex: 1; min-width: 0; }
+.pomo-settings .hint { font-size: 11.5px; }
+@media (max-width: 480px) { .pomo-panel { right: 8px; left: 8px; width: auto; } .pomo-time { font-size: 44px; } }
