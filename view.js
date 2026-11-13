@@ -14,6 +14,7 @@
   };
   const PALETTE = ['#4285f4', '#33b679', '#f4511e', '#8e24aa', '#e4a11b', '#039be5', '#e67c73', '#0b8043'];
   const MIN_HOUR_PX = 34;
+  const MIN_EVENT_PX = 20;
   const SCROLL_HOUR_PX = 48;
   const DAY_MS = 864e5;
   const REFRESH_MS = 10 * 60e3;
@@ -317,21 +318,65 @@
   }
 
   function layoutColumns(items) {
-    // items: [{s, e}] (ms). Assign col / cols for overlapping groups.
-    const minMs = (22 / hourPx) * 3.6e6;
+    // items: [{s, e}] (ms). Assign col / cols using real times, so back-to-back
+    // events (one ends 10:30, next starts 10:30) stay in the same column.
     items.sort((a, b) => a.s - b.s || (b.e - b.s) - (a.e - a.s));
     let cluster = [], colsEnd = [], clusterEnd = -Infinity;
     const finish = () => { for (const it of cluster) it.cols = colsEnd.length; cluster = []; colsEnd = []; };
     for (const it of items) {
-      const effE = Math.max(it.e, it.s + minMs);
+      const e = Math.max(it.e, it.s + 1);
       if (it.s >= clusterEnd) { finish(); clusterEnd = -Infinity; }
       let col = colsEnd.findIndex((end) => end <= it.s);
-      if (col === -1) { col = colsEnd.length; colsEnd.push(effE); } else colsEnd[col] = effE;
+      if (col === -1) { col = colsEnd.length; colsEnd.push(e); } else colsEnd[col] = e;
       it.col = col;
       cluster.push(it);
-      clusterEnd = Math.max(clusterEnd, effE);
+      clusterEnd = Math.max(clusterEnd, e);
     }
     finish();
+    // Every event is drawn at least MIN_EVENT_PX tall so it stays readable.
+    // Back-to-back events in the same column form a chain; the chain keeps its
+    // real start and end, and short events borrow height from longer ones in it.
+    const minMs = ((MIN_EVENT_PX + 2) / hourPx) * 3.6e6;
+    const chains = [];
+    const tail = new Map(); // "col/cols" -> last chain in that lane
+    for (const it of items) {
+      const lane = `${it.col}/${it.cols}`;
+      const ch = tail.get(lane);
+      if (ch && ch.end === it.s) { ch.items.push(it); ch.end = it.e; }
+      else { const n = { items: [it], end: it.e }; chains.push(n); tail.set(lane, n); }
+    }
+    for (const ch of chains) {
+      const list = ch.items, start = list[0].s, span = ch.end - start;
+      const dur = list.map((it) => Math.max(1, it.e - it.s));
+      let sizes;
+      if (list.length > 1 && list.length * minMs <= span) {
+        // Shrink only the longest events: cap c so sum(min(want, c)) === span.
+        const want = dur.map((d) => Math.max(minMs, d));
+        let lo = minMs, hi = Math.max(...want);
+        for (let i = 0; i < 40; i++) {
+          const c = (lo + hi) / 2;
+          const sum = want.reduce((acc, w) => acc + Math.min(w, c), 0);
+          if (sum > span) hi = c; else lo = c;
+        }
+        sizes = want.map((w) => Math.min(w, lo));
+      } else {
+        sizes = dur.map((d) => Math.max(minMs, d));
+      }
+      let t = start;
+      list.forEach((it, i) => { it.vs = t; it.ve = t + sizes[i]; t = it.ve; });
+    }
+    // Safety net: if something still collides with an event drawn above it in
+    // the same horizontal space (very dense days), nudge it down.
+    const placed = [];
+    for (const it of items) {
+      const l = it.col / it.cols, r = (it.col + 1) / it.cols;
+      let shift = 0;
+      for (const o of placed) {
+        if (o.l < r - 1e-9 && o.r > l + 1e-9 && o.ve > it.vs + shift && o.vs < it.vs + shift) shift = o.ve - it.vs;
+      }
+      it.vs += shift; it.ve += shift;
+      placed.push({ l, r, vs: it.vs, ve: it.ve });
+    }
     return items;
   }
 
@@ -526,8 +571,8 @@
 
   function eventBlock(it, visStart, now) {
     const { o } = it;
-    const top = ((it.s - visStart.getTime()) / 3.6e6) * hourPx;
-    const height = Math.max(20, ((it.e - it.s) / 3.6e6) * hourPx - 2);
+    const top = ((it.vs - visStart.getTime()) / 3.6e6) * hourPx;
+    const height = ((it.ve - it.vs) / 3.6e6) * hourPx - 2;
     const b = el('div', 'event');
     b.style.setProperty('--ev-color', o.color);
     b.style.top = `${top + 1}px`;

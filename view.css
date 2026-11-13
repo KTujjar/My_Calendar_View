@@ -137,7 +137,7 @@ main { flex: 1 1 auto; min-height: 0; position: relative; display: flex; }
 .event:hover { z-index: 5; filter: brightness(0.97); box-shadow: 0 0 0 1px var(--bg), 0 2px 8px rgba(0,0,0,.15); }
 .event .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
 .event .time, .event .loc { color: var(--muted); font-size: 11px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
-.event.short { display: flex; gap: 6px; align-items: baseline; white-space: nowrap; padding-top: 1px; }
+.event.short { display: flex; gap: 6px; align-items: center; white-space: nowrap; padding-top: 0; padding-bottom: 0; }
 .event.short .title { flex: 0 1 auto; }
 .event.clip-top { border-top-left-radius: 0; border-top-right-radius: 0; border-top: 2px dotted var(--ev-color); }
 .event.clip-bottom { border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom: 2px dotted var(--ev-color); }
