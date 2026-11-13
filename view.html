@@ -18,6 +18,7 @@
       <h1 id="rangeTitle"></h1>
     </div>
     <div class="tb-right">
+      <button id="nextUp" class="next-up" hidden></button>
       <span id="status" class="status"></span>
       <button id="btnRefresh" class="btn icon" title="Refresh (R)" aria-label="Refresh">&#8635;</button>
       <div class="seg" role="tablist">
@@ -25,6 +26,7 @@
         <button id="btnWeek" class="seg-btn" title="Week view (W)">Week</button>
       </div>
       <button id="btnNew" class="btn primary" title="Create an event in Google Calendar">+ New</button>
+      <button id="btnStats" class="btn icon" title="Stats (S)" aria-label="Stats">&#128202;</button>
       <button id="btnPomo" class="btn pomo-btn" title="Pomodoro timer (F)" aria-label="Pomodoro timer"><span aria-hidden="true">&#127813;</span><span id="pomoBadge"></span></button>
       <button id="btnSettings" class="btn icon" title="Settings" aria-label="Settings">&#9881;</button>
     </div>
@@ -94,6 +96,21 @@
       <label class="check"><input id="setDoneSound" type="checkbox"> Play a sound when I complete an event</label>
       <p class="hint">Click an event and choose <b>Complete</b> (or hover it and press <b>C</b>). Completions sync to any Chrome you're signed into.</p>
 
+      <h3>Reminders</h3>
+      <div class="row">
+        <label>Notify me
+          <select id="setReminder">
+            <option value="0">Off</option>
+            <option value="1">1 minute before</option>
+            <option value="5">5 minutes before</option>
+            <option value="10">10 minutes before</option>
+            <option value="15">15 minutes before</option>
+            <option value="30">30 minutes before</option>
+          </select>
+        </label>
+      </div>
+      <p class="hint">Chrome shows a notification before each event, even if this tab is closed. Completed and declined events are skipped.</p>
+
       <h3>Google account</h3>
       <div class="row">
         <label>Account number <input id="setAccount" type="number" min="0" max="9" step="1"></label>
@@ -106,6 +123,22 @@
     </div>
   </div>
 
+  <div id="statsBackdrop" class="backdrop" hidden>
+    <div class="dialog stats-dialog" role="dialog" aria-modal="true" aria-labelledby="statsTitle">
+      <div class="dialog-head">
+        <h2 id="statsTitle">Your stats</h2>
+        <div class="stats-head-right">
+          <div class="seg" role="tablist">
+            <button class="seg-btn" data-stats-range="7">7 days</button>
+            <button class="seg-btn" data-stats-range="30">30 days</button>
+          </div>
+          <button id="btnCloseStats" class="btn icon" aria-label="Close">&#10005;</button>
+        </div>
+      </div>
+      <div id="statsBody"></div>
+    </div>
+  </div>
+
   <aside id="pomoPanel" class="pomo-panel" hidden aria-label="Pomodoro timer">
     <div class="pomo-head">
       <div class="seg pomo-modes" role="tablist">
@@ -115,7 +148,18 @@
       </div>
       <button id="pomoClose" class="btn icon" aria-label="Close timer">&#10005;</button>
     </div>
+    <div id="pomoTask" class="pomo-task" hidden>
+      <span>Focusing on <b id="pomoTaskTitle"></b></span>
+      <button id="pomoTaskClear" class="btn icon" title="Stop linking this event" aria-label="Clear event">&#10005;</button>
+    </div>
     <div id="pomoFlash" class="pomo-flash" hidden></div>
+    <div id="pomoAsk" class="pomo-ask" hidden>
+      <div>Mark <b id="pomoAskTitle"></b> complete?</div>
+      <div class="pomo-ask-btns">
+        <button id="pomoAskYes" class="btn complete">&#10003; Mark complete</button>
+        <button id="pomoAskNo" class="btn">Not yet</button>
+      </div>
+    </div>
     <div id="pomoTime" class="pomo-time">25:00</div>
     <div class="pomo-track"><div id="pomoBar" class="pomo-bar"></div></div>
     <div class="pomo-actions">
@@ -154,5 +198,6 @@
   <script src="lib/ical.min.js"></script>
   <script src="view.js"></script>
   <script src="pomodoro.js"></script>
+  <script src="stats.js"></script>
 </body>
 </html>

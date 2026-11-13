@@ -29,10 +29,12 @@ const POMO_TEXT = {
 };
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name.startsWith('evt|')) { eventReminder(alarm.name); return; }
   if (alarm.name !== 'pomodoro') return;
   const { pomoAlarmInfo: info } = await chrome.storage.local.get('pomoAlarmInfo');
   const t = POMO_TEXT[(info && info.mode) || 'focus'] || POMO_TEXT.focus;
-  const message = (info && t[info.nextMode]) || 'Timer finished.';
+  let message = (info && t[info.nextMode]) || 'Timer finished.';
+  if (info && info.task && info.mode === 'focus') message = `${info.task} — ${message} Open the calendar to mark it complete.`;
   chrome.notifications.create('pomodoro', {
     type: 'basic',
     iconUrl: 'icons/icon128.png',
@@ -43,7 +45,24 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   });
 });
 
+// Event reminders scheduled by the calendar page.
+async function eventReminder(name) {
+  const { eventReminders: all } = await chrome.storage.local.get('eventReminders');
+  const info = all && all[name];
+  if (!info || Date.now() > info.start + 60e3) return; // missed (e.g. computer was asleep)
+  const mins = Math.max(0, Math.round((info.start - Date.now()) / 60e3));
+  const at = new Date(info.start).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  chrome.notifications.create(name, {
+    type: 'basic',
+    iconUrl: 'icons/icon128.png',
+    title: info.title,
+    message: `${mins ? `Starts in ${mins} min` : 'Starting now'} · ${at}${info.location ? ` · ${info.location}` : ''}`,
+    priority: 2,
+  });
+}
+
 chrome.notifications.onClicked.addListener((id) => {
+  if (id.startsWith('evt|')) { chrome.notifications.clear(id); openView(); return; }
   if (id !== 'pomodoro') return;
   chrome.notifications.clear(id);
   openView();

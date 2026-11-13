@@ -12,6 +12,7 @@
     accountIndex: 2,
     view: 'week',
     doneSound: true,      // play a short chime when completing an event
+    reminderMin: 5,       // notify this many minutes before events (0 = off)
   };
   const PALETTE = ['#4285f4', '#33b679', '#f4511e', '#8e24aa', '#e4a11b', '#039be5', '#e67c73', '#0b8043'];
   const MIN_HOUR_PX = 34;
@@ -411,7 +412,124 @@
     saveCompleted();
     refreshDoneMarks(done ? o.doneId : null);
     if (done) celebrate();
+    afterDoneChange();
   }
+  function afterDoneChange() { updateUpcoming(); scheduleReminders(); }
+
+  // Completion requested from the Pomodoro panel ("Mark complete" after a focus session).
+  document.addEventListener('cal:complete', (e) => {
+    const { doneId, start } = e.detail || {};
+    if (!doneId) return;
+    completed.set(doneId, dayNum(new Date(start || Date.now())));
+    saveCompleted();
+    refreshDoneMarks(doneId);
+    afterDoneChange();
+  });
+
+  // ---------- upcoming events & reminders ----------
+  function upcomingOccurrences(hours) {
+    const now = Date.now();
+    let occ = [];
+    for (const cal of settings.calendars) {
+      if (cal.enabled === false) continue;
+      const model = models.get(cal.id);
+      if (model) occ = occ.concat(expand(cal, model, new Date(now - 12 * 3.6e6), new Date(now + hours * 3.6e6)));
+    }
+    return occ
+      .filter((o) => !o.allDay && !o.declined && o.end.getTime() > now && !isDone(o))
+      .sort((a, b) => a.start - b.start);
+  }
+  const fmtDur = (ms) => {
+    const m = Math.max(1, Math.round(ms / 60e3));
+    if (m < 60) return `${m} min`;
+    const h = Math.floor(m / 60), r = m % 60;
+    return r ? `${h}h ${r}m` : `${h}h`;
+  };
+  let upcomingTarget = null;
+  function updateUpcoming() {
+    const chip = $('nextUp');
+    if (!chip) return;
+    const now = Date.now();
+    const list = settings.calendars.length ? upcomingOccurrences(14) : [];
+    const current = list.find((o) => o.start.getTime() <= now);
+    const next = list.find((o) => o.start.getTime() > now);
+    let text = '', o = null;
+    if (current) { o = current; text = `Now: ${current.title} · ${fmtDur(current.end - now)} left`; }
+    else if (next && next.start - now <= 12 * 3.6e6) {
+      o = next;
+      const ms = next.start - now;
+      text = ms <= 2 * 3.6e6 ? `Next: ${next.title} in ${fmtDur(ms)}` : `Next: ${next.title} at ${fmt.time.format(next.start)}`;
+    }
+    upcomingTarget = o;
+    chip.hidden = !o;
+    chip.textContent = text;
+    chip.title = o ? `${whenText(o)} · ${o.title}` : '';
+    chip.classList.toggle('now', !!current);
+    chip.classList.toggle('soon', !current && !!next && next.start - now <= 15 * 60e3);
+  }
+
+  // Schedule Chrome alarms for the next ~day of events; background.js turns them
+  // into notifications, so they fire even when no calendar tab is open.
+  const hasAlarms = typeof chrome !== 'undefined' && chrome.alarms;
+  let reminderSig = '';
+  let reminderTimer = null;
+  function scheduleReminders() {
+    clearTimeout(reminderTimer);
+    reminderTimer = setTimeout(doScheduleReminders, 800);
+  }
+  async function doScheduleReminders() {
+    if (!hasAlarms) return;
+    const lead = Math.max(0, Number(settings.reminderMin) || 0) * 60e3;
+    const now = Date.now();
+    const list = lead ? upcomingOccurrences(26).filter((o) => o.start.getTime() - lead > now + 5e3).slice(0, 40) : [];
+    const info = {};
+    for (const o of list) {
+      info[`evt|${o.doneId}|${o.start.getTime()}`] = {
+        title: o.title, start: o.start.getTime(), end: o.end.getTime(), location: o.location || '', lead,
+      };
+    }
+    const sig = JSON.stringify(info);
+    if (sig === reminderSig) return;
+    reminderSig = sig;
+    try {
+      const all = await chrome.alarms.getAll();
+      await Promise.all(all.filter((a) => a.name.startsWith('evt|') && !info[a.name]).map((a) => chrome.alarms.clear(a.name)));
+      const have = new Set(all.map((a) => a.name));
+      for (const [name, v] of Object.entries(info)) {
+        if (!have.has(name)) chrome.alarms.create(name, { when: v.start - v.lead });
+      }
+      await store.set('eventReminders', info);
+    } catch (e) { console.warn('Could not schedule reminders', e); }
+  }
+
+  // Completed vs scheduled per day, for the stats panel (stats.js).
+  window.MyCal = {
+    completionByDay(numDays) {
+      const today = startOfDay(new Date());
+      const first = addDays(today, -(numDays - 1));
+      const end = addDays(today, 1);
+      let occ = [];
+      for (const cal of settings.calendars) {
+        if (cal.enabled === false) continue;
+        const model = models.get(cal.id);
+        if (model) occ = occ.concat(expand(cal, model, first, end));
+      }
+      const days = [];
+      for (let i = 0; i < numDays; i++) days.push({ date: addDays(first, i), total: 0, done: 0, seen: new Set() });
+      for (const o of occ) {
+        if (!countsTowardProgress(o)) continue;
+        const idx = Math.round((startOfDay(o.start) - first) / DAY_MS);
+        const d = days[idx];
+        if (!d || d.seen.has(o.doneId)) continue;
+        d.seen.add(o.doneId);
+        d.total += 1;
+        if (isDone(o)) d.done += 1;
+      }
+      return days.map(({ date, total, done }) => ({ date, total, done }));
+    },
+    hasCalendars: () => settings.calendars.length > 0,
+  };
+
   function toggleCompleted(o) { const d = !isDone(o); setDone(o, d); return d; }
 
   // Update calendar blocks and per-day progress without a full re-render.
@@ -634,6 +752,8 @@
     }
     root.appendChild(head);
     updateProgress();
+    updateUpcoming();
+    scheduleReminders();
 
     // Strips: all-day, before start, after end
     const strip = (label, key, opts = {}) => {
@@ -863,6 +983,16 @@
     doneBtn.addEventListener('click', (ev) => { ev.stopPropagation(); toggleCompleted(o); setDoneLabel(); });
     popoverState = { o, setDoneLabel };
     actions.appendChild(doneBtn);
+    const focusBtn = el('button', 'btn', '🍅 Focus on this');
+    focusBtn.title = 'Start a Pomodoro focus session for this event';
+    focusBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      document.dispatchEvent(new CustomEvent('pomo:focus', {
+        detail: { title: o.title, doneId: o.doneId, start: o.start.getTime() },
+      }));
+      closePopover();
+    });
+    actions.appendChild(focusBtn);
     const open = el('a', 'btn primary', 'Open in Google Calendar');
     open.href = eventUrl(o); open.target = '_blank'; open.rel = 'noopener';
     open.style.textDecoration = 'none';
@@ -904,6 +1034,7 @@
     $('setWeekStart').value = settings.weekStart;
     $('setWeekends').checked = !!settings.showWeekends;
     $('setDoneSound').checked = !!settings.doneSound;
+    $('setReminder').value = String(settings.reminderMin ?? 5);
     $('setAccount').value = settings.accountIndex;
     renderCalList();
     $('settingsBackdrop').hidden = false;
@@ -1003,6 +1134,14 @@
     $('setFit').addEventListener('change', () => { settings.fit = $('setFit').checked; saveSettings(); render(); });
     $('setWeekStart').addEventListener('change', () => { settings.weekStart = Number($('setWeekStart').value); saveSettings(); render(); });
     $('setWeekends').addEventListener('change', () => { settings.showWeekends = $('setWeekends').checked; saveSettings(); render(); });
+    $('setReminder').addEventListener('change', () => {
+      settings.reminderMin = Number($('setReminder').value);
+      saveSettings(); scheduleReminders();
+    });
+    $('nextUp').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (upcomingTarget) showPopover(upcomingTarget, $('nextUp'));
+    });
     $('setDoneSound').addEventListener('change', () => {
       settings.doneSound = $('setDoneSound').checked; saveSettings();
       if (settings.doneSound) celebrate();
@@ -1053,7 +1192,7 @@
     });
     setInterval(() => {
       if (startOfDay(new Date()).getTime() !== renderedDay) render();
-      else { positionNowLines(); updateStatus(); }
+      else { positionNowLines(); updateStatus(); updateUpcoming(); }
     }, 60e3);
     setInterval(() => { if (!document.hidden) refreshAll(); }, REFRESH_MS);
   }

@@ -32,7 +32,8 @@
 
   let cfg = { ...DEFAULTS };
   // mode, running, endAt (ms, when running), remaining (ms, when paused), focusCount
-  let state = { mode: 'focus', running: false, endAt: 0, remaining: null, focusCount: 0 };
+  // task: {title, doneId, start} — the calendar event this focus session is for
+  let state = { mode: 'focus', running: false, endAt: 0, remaining: null, focusCount: 0, task: null };
   let tickTimer = null, endTimer = null;
 
   // ---------- ringtones (synthesized, no audio files) ----------
@@ -116,7 +117,10 @@
     if (!hasAlarms) return;
     chrome.alarms.clear(ALARM);
     if (state.running) chrome.alarms.create(ALARM, { when: state.endAt });
-    store.set('pomoAlarmInfo', { mode: state.mode, nextMode: nextMode(), endAt: state.endAt });
+    store.set('pomoAlarmInfo', {
+      mode: state.mode, nextMode: nextMode(), endAt: state.endAt,
+      task: state.task ? state.task.title : null,
+    });
   }
 
   function start() {
@@ -155,13 +159,57 @@
   function advance(finishedNaturally, silent) {
     const from = state.mode;
     const to = nextMode();
-    if (from === 'focus' && finishedNaturally) state.focusCount += 1;
+    if (from === 'focus' && finishedNaturally) {
+      state.focusCount += 1;
+      recordFocus(durMs('focus'));
+      if (state.task) askTaskDone();
+    }
     if (finishedNaturally && !silent) {
       playRingtone(cfg.ringtone, Math.max(1, Number(cfg.repeats) || 1));
       flash(`${MODES[from].done}. ${MODES[to === 'focus' ? from : 'focus'].next}`);
     }
     const auto = finishedNaturally && !silent && (to === 'focus' ? cfg.autoFocus : cfg.autoBreaks);
     switchMode(to, auto);
+  }
+
+  // ---------- focus history (for stats) ----------
+  const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  async function recordFocus(ms) {
+    const hist = (await store.get('pomoHistory')) || {};
+    const k = ymd(new Date());
+    const day = hist[k] || { sessions: 0, minutes: 0 };
+    day.sessions += 1;
+    day.minutes += Math.round(ms / 60e3);
+    hist[k] = day;
+    // keep a year of history
+    const cutoff = ymd(new Date(Date.now() - 366 * 864e5));
+    for (const key of Object.keys(hist)) if (key < cutoff) delete hist[key];
+    await store.set('pomoHistory', hist);
+  }
+
+  // ---------- focusing on a calendar event ----------
+  function focusOn(task) {
+    state.task = task;
+    $('pomoPanel').hidden = false;
+    $('pomoAsk').hidden = true;
+    if (state.mode === 'focus' && state.running) { save(); setAlarm(); paint(); return; }
+    stopRinging();
+    state.mode = 'focus'; state.running = false; state.remaining = null;
+    start();
+  }
+  function askTaskDone() {
+    $('pomoAskTitle').textContent = state.task.title;
+    $('pomoAsk').hidden = false;
+    $('pomoPanel').hidden = false;
+  }
+  function answerTask(done) {
+    $('pomoAsk').hidden = true;
+    state.pendingAsk = false;
+    if (done && state.task) {
+      document.dispatchEvent(new CustomEvent('cal:complete', { detail: { doneId: state.task.doneId, start: state.task.start } }));
+      state.task = null;
+    }
+    save(); setAlarm(); paint();
   }
 
   function schedule() {
@@ -210,6 +258,10 @@
       dots.appendChild(d);
     }
     $('pomoCount').textContent = `${state.focusCount} focus session${state.focusCount === 1 ? '' : 's'} today`;
+
+    const task = $('pomoTask');
+    task.hidden = !state.task;
+    $('pomoTaskTitle').textContent = state.task ? state.task.title : '';
 
     const active = state.running || state.remaining != null;
     const badge = $('pomoBadge');
@@ -285,6 +337,10 @@
       playRingtone(cfg.ringtone, 1);
     });
     $('pomoPreview').addEventListener('click', () => playRingtone(cfg.ringtone, 1));
+    $('pomoTaskClear').addEventListener('click', () => { state.task = null; $('pomoAsk').hidden = true; save(); setAlarm(); paint(); });
+    $('pomoAskYes').addEventListener('click', () => answerTask(true));
+    $('pomoAskNo').addEventListener('click', () => answerTask(false));
+    document.addEventListener('pomo:focus', (e) => { if (e.detail) focusOn(e.detail); });
     $('pomoResetCount').addEventListener('click', () => { state.focusCount = 0; save(); paint(); });
 
     document.addEventListener('keydown', (e) => {
@@ -326,9 +382,15 @@
     state = { ...state, ...((await store.get('pomoState')) || {}) };
     rollDay();
     // Finished while the tab was closed: move on quietly (the notification already told you).
-    if (state.running && state.endAt <= Date.now()) { state.running = false; advance(true, true); }
+    if (state.running && state.endAt <= Date.now()) {
+      const wasFocus = state.mode === 'focus';
+      state.running = false;
+      advance(true, true);
+      state.pendingAsk = wasFocus && !!state.task;
+    }
     fillSettings();
     bind();
+    if (state.task && state.mode !== 'focus' && state.pendingAsk) askTaskDone();
     schedule();
     paint();
     setInterval(() => { rollDay(); if (!state.running) paint(); }, 60e3);
