@@ -11,6 +11,7 @@
     showWeekends: true,
     accountIndex: 2,
     view: 'week',
+    doneSound: true,      // play a short chime when completing an event
   };
   const PALETTE = ['#4285f4', '#33b679', '#f4511e', '#8e24aa', '#e4a11b', '#039be5', '#e67c73', '#0b8043'];
   const MIN_HOUR_PX = 34;
@@ -43,7 +44,6 @@
   const meta = new Map();     // calId -> {fetchedAt, error}
   let lastFetch = 0;
   let refreshing = false;
-  let completed = new Set();  // event keys (one per occurrence) marked complete
   let hourPx = SCROLL_HOUR_PX;
   let nowRefs = [];
   let renderedDay = startOfDay(new Date()).getTime();
@@ -176,8 +176,13 @@
       const st = s.getTime(), et = e.getTime();
       const inRange = st < re && (et > rs || (et === st && st >= rs));
       if (!inRange) return;
+      const rid = recurrenceId || item.recurrenceId || null;
+      const doneKey = rid
+        ? `${cal.id}|${item.uid}|${ymd(rid.toJSDate())}`
+        : `${cal.id}|${item.uid}`;
       out.push({
         key: `${cal.id}|${item.uid}|${st}`,
+        doneId: hashKey(doneKey),
         calId: cal.id,
         calName: cal.name,
         color: cal.color,
@@ -300,18 +305,161 @@
   async function saveSettings() { await store.set('settings', settings); }
 
   // ---------- completed events ----------
-  async function loadCompleted() {
-    const saved = await store.get('completed');
-    completed = new Set(Array.isArray(saved) ? saved : []);
-  }
-  async function toggleCompleted(o) {
-    if (completed.has(o.key)) completed.delete(o.key); else completed.add(o.key);
-    const done = completed.has(o.key);
-    for (const node of document.querySelectorAll('[data-key]')) {
-      if (node.dataset.key === o.key) node.classList.toggle('done', done);
+  // Completions are keyed by event (and, for repeating events, by the date of the
+  // original occurrence) so they survive time changes. They live in
+  // chrome.storage.sync so they follow you to any Chrome you're signed into.
+  // Stored compactly as {hash: dayNumber}, split into shards under the 8 KB
+  // per-item sync limit, and entries older than DONE_KEEP_DAYS are pruned.
+  const DONE_KEEP_DAYS = 120;
+  const DONE_MAX = 3000;
+  const DONE_SHARD = 250;
+  const DONE_PREFIX = 'done_';
+  const syncArea = hasChrome && chrome.storage.sync ? chrome.storage.sync : null;
+  let completed = new Map();   // doneId -> day number (days since epoch) of the event
+  let legacyDone = new Set();  // keys saved by the first version (local only)
+  let doneShardCount = 0;
+
+  function ymd(d) { return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`; }
+  function hashKey(str) {
+    // cyrb53: short, stable 53-bit hash, encoded base36 (~11 chars)
+    let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for (let i = 0; i < str.length; i++) {
+      const ch = str.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
     }
-    await store.set('completed', [...completed]);
-    return done;
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+  }
+  const dayNum = (d) => Math.floor(startOfDay(d).getTime() / DAY_MS + 0.5);
+
+  async function readDoneStore() {
+    const merged = {};
+    if (syncArea) {
+      const all = await syncArea.get(null);
+      doneShardCount = 0;
+      for (const [k, v] of Object.entries(all)) {
+        if (!k.startsWith(DONE_PREFIX) || !v || typeof v !== 'object') continue;
+        doneShardCount = Math.max(doneShardCount, Number(k.slice(DONE_PREFIX.length)) + 1);
+        Object.assign(merged, v);
+      }
+    } else {
+      Object.assign(merged, (await store.get('completedV2')) || {});
+    }
+    return merged;
+  }
+
+  async function loadCompleted() {
+    let merged = {};
+    try { merged = await readDoneStore(); } catch (e) { console.warn('Could not read completions', e); }
+    const cutoff = dayNum(new Date()) - DONE_KEEP_DAYS;
+    completed = new Map(Object.entries(merged).filter(([, d]) => d >= cutoff));
+    const legacy = await store.get('completed');
+    legacyDone = new Set(Array.isArray(legacy) ? legacy : []);
+  }
+
+  let saveTimer = null;
+  function saveCompleted() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(writeCompleted, 300);
+  }
+  async function writeCompleted() {
+    const entries = [...completed.entries()].sort((a, b) => b[1] - a[1]).slice(0, DONE_MAX);
+    try {
+      if (syncArea) {
+        const data = {};
+        const shards = Math.ceil(entries.length / DONE_SHARD);
+        for (let i = 0; i < shards; i++) {
+          data[DONE_PREFIX + i] = Object.fromEntries(entries.slice(i * DONE_SHARD, (i + 1) * DONE_SHARD));
+        }
+        const stale = [];
+        for (let i = shards; i < doneShardCount; i++) stale.push(DONE_PREFIX + i);
+        writingSync = true;
+        if (shards) await syncArea.set(data);
+        if (stale.length) await syncArea.remove(stale);
+        doneShardCount = shards;
+      } else {
+        await store.set('completedV2', Object.fromEntries(entries));
+      }
+    } catch (e) {
+      console.warn('Could not save completions', e);
+      setStatus("Couldn't sync completions — will retry on next change");
+    } finally {
+      setTimeout(() => { writingSync = false; }, 500);
+    }
+    if (legacyDone.size === 0 && (await store.get('completed')) !== undefined) await store.remove('completed');
+    else if (legacyDone.size) await store.set('completed', [...legacyDone]);
+  }
+  let writingSync = false;
+
+  function isDone(o) {
+    if (completed.has(o.doneId)) return true;
+    if (legacyDone.has(o.key)) {
+      // Migrate a completion saved by the first version to the new key.
+      legacyDone.delete(o.key);
+      completed.set(o.doneId, dayNum(o.start));
+      saveCompleted();
+      return true;
+    }
+    return false;
+  }
+
+  function setDone(o, done) {
+    if (done) completed.set(o.doneId, dayNum(o.start));
+    else { completed.delete(o.doneId); legacyDone.delete(o.key); }
+    saveCompleted();
+    refreshDoneMarks(done ? o.doneId : null);
+    if (done) celebrate();
+  }
+  function toggleCompleted(o) { const d = !isDone(o); setDone(o, d); return d; }
+
+  // Update calendar blocks and per-day progress without a full re-render.
+  function refreshDoneMarks(justDoneId) {
+    for (const node of document.querySelectorAll('[data-done-id]')) {
+      const d = completed.has(node.dataset.doneId);
+      node.classList.toggle('done', d);
+      if (d && node.dataset.doneId === justDoneId && !reducedMotion()) {
+        node.classList.remove('pop'); void node.offsetWidth; node.classList.add('pop');
+      }
+    }
+    updateProgress();
+  }
+
+  // ---------- celebration (animation + optional chime) ----------
+  const reducedMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let audioCtx = null;
+  function celebrate() {
+    if (!settings.doneSound) return;
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      const t0 = audioCtx.currentTime;
+      [[880, 0], [1318.5, 0.09]].forEach(([freq, at]) => {
+        const osc = audioCtx.createOscillator(), g = audioCtx.createGain();
+        osc.type = 'sine'; osc.frequency.value = freq;
+        g.gain.setValueAtTime(0.0001, t0 + at);
+        g.gain.exponentialRampToValueAtTime(0.18, t0 + at + 0.015);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + at + 0.32);
+        osc.connect(g).connect(audioCtx.destination);
+        osc.start(t0 + at); osc.stop(t0 + at + 0.35);
+      });
+    } catch { /* audio not available */ }
+  }
+
+  // ---------- per-day progress ----------
+  let progressRefs = []; // [{node, items:[o]}]
+  function countsTowardProgress(o) {
+    if (o.declined) return false;
+    if (o.allDay) return o.end - o.start <= DAY_MS; // skip multi-day spans like trips
+    return true;
+  }
+  function updateProgress() {
+    for (const r of progressRefs) {
+      const total = r.items.length;
+      const done = r.items.filter(isDone).length;
+      r.node.textContent = total ? `${done}/${total} done` : '';
+      r.node.classList.toggle('all', total > 0 && done === total);
+    }
   }
 
   // ---------- rendering ----------
@@ -398,6 +546,7 @@
 
   function render() {
     closePopover();
+    hoveredEvent = null;
     const hasCals = settings.calendars.length > 0;
     $('welcome').hidden = hasCals;
     $('calendar').hidden = !hasCals;
@@ -465,17 +614,26 @@
     // Header
     const head = el('div', 'cal-head');
     head.appendChild(el('div', 'gutter'));
-    for (const { day } of perDay) {
+    progressRefs = [];
+    for (const d of perDay) {
+      const { day } = d;
       const h = el('div', 'day-head');
       if (sameDay(day, now)) h.classList.add('today');
       else if (day < startOfDay(now)) h.classList.add('past');
       h.appendChild(el('div', 'dow', fmt.dow.format(day)));
       h.appendChild(el('div', 'dnum', String(day.getDate())));
+      const prog = el('div', 'progress');
+      h.appendChild(prog);
+      const seen = new Set();
+      const items = [...d.allDay, ...d.early, ...d.timed.map((t) => t.o), ...d.late]
+        .filter((o) => countsTowardProgress(o) && !seen.has(o.doneId) && seen.add(o.doneId));
+      progressRefs.push({ node: prog, items });
       h.title = fmt.medDay.format(day);
       h.addEventListener('click', () => { anchor = day; settings.view = 'day'; saveSettings(); render(); });
       head.appendChild(h);
     }
     root.appendChild(head);
+    updateProgress();
 
     // Strips: all-day, before start, after end
     const strip = (label, key, opts = {}) => {
@@ -580,8 +738,9 @@
     c.appendChild(document.createTextNode(o.title));
     if (o.end <= new Date()) c.classList.add('past');
     if (o.declined) c.classList.add('declined');
-    c.dataset.key = o.key;
-    if (completed.has(o.key)) c.classList.add('done');
+    c.dataset.doneId = o.doneId;
+    trackHover(c, o);
+    if (isDone(o)) c.classList.add('done');
     c.title = allDay ? o.title : `${timeRange(o.start, o.end)} · ${o.title}`;
     c.addEventListener('click', (ev) => { ev.stopPropagation(); showPopover(o, c); });
     return c;
@@ -602,8 +761,9 @@
     if (it.clipBottom) b.classList.add('clip-bottom');
     if (o.end <= now) b.classList.add('past');
     if (o.declined) b.classList.add('declined');
-    b.dataset.key = o.key;
-    if (completed.has(o.key)) b.classList.add('done');
+    b.dataset.doneId = o.doneId;
+    trackHover(b, o);
+    if (isDone(o)) b.classList.add('done');
 
     const when = timeRange(o.start, o.end);
     if (height < 36) {
@@ -694,16 +854,14 @@
     const actions = el('div', 'p-actions');
     const doneBtn = el('button', 'btn complete');
     const setDoneLabel = () => {
-      const d = completed.has(o.key);
+      const d = isDone(o);
       doneBtn.textContent = d ? '↺ Mark incomplete' : '✓ Complete';
+      doneBtn.title = 'Shortcut: C';
       doneBtn.classList.toggle('is-done', d);
     };
     setDoneLabel();
-    doneBtn.addEventListener('click', async (ev) => {
-      ev.stopPropagation();
-      await toggleCompleted(o);
-      setDoneLabel();
-    });
+    doneBtn.addEventListener('click', (ev) => { ev.stopPropagation(); toggleCompleted(o); setDoneLabel(); });
+    popoverState = { o, setDoneLabel };
     actions.appendChild(doneBtn);
     const open = el('a', 'btn primary', 'Open in Google Calendar');
     open.href = eventUrl(o); open.target = '_blank'; open.rel = 'noopener';
@@ -723,7 +881,13 @@
     p.style.left = `${Math.max(8, left)}px`;
     p.style.top = `${Math.max(8, top)}px`;
   }
-  function closePopover() { $('popover').hidden = true; }
+  let popoverState = null;
+  let hoveredEvent = null; // event under the mouse, for the C shortcut
+  function trackHover(node, o) {
+    node.addEventListener('mouseenter', () => { hoveredEvent = o; });
+    node.addEventListener('mouseleave', () => { if (hoveredEvent === o) hoveredEvent = null; });
+  }
+  function closePopover() { $('popover').hidden = true; popoverState = null; }
 
   // ---------- settings dialog ----------
   function fillHourSelects() {
@@ -739,6 +903,7 @@
     $('setFit').checked = !!settings.fit;
     $('setWeekStart').value = settings.weekStart;
     $('setWeekends').checked = !!settings.showWeekends;
+    $('setDoneSound').checked = !!settings.doneSound;
     $('setAccount').value = settings.accountIndex;
     renderCalList();
     $('settingsBackdrop').hidden = false;
@@ -838,6 +1003,10 @@
     $('setFit').addEventListener('change', () => { settings.fit = $('setFit').checked; saveSettings(); render(); });
     $('setWeekStart').addEventListener('change', () => { settings.weekStart = Number($('setWeekStart').value); saveSettings(); render(); });
     $('setWeekends').addEventListener('change', () => { settings.showWeekends = $('setWeekends').checked; saveSettings(); render(); });
+    $('setDoneSound').addEventListener('change', () => {
+      settings.doneSound = $('setDoneSound').checked; saveSettings();
+      if (settings.doneSound) celebrate();
+    });
     $('setAccount').addEventListener('change', () => { settings.accountIndex = Math.max(0, Number($('setAccount').value) || 0); saveSettings(); });
 
     $('addCalForm').addEventListener('submit', async (e) => {
@@ -858,6 +1027,15 @@
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.target.closest('input, select, textarea') || !$('settingsBackdrop').hidden) return;
       const k = e.key.toLowerCase();
+      if (k === 'c') {
+        // Popup open → that event; otherwise the event under the mouse.
+        const target = popoverState && !$('popover').hidden ? popoverState.o : hoveredEvent;
+        if (!target) return;
+        toggleCompleted(target);
+        if (popoverState && popoverState.o.doneId === target.doneId) popoverState.setDoneLabel();
+        e.preventDefault();
+        return;
+      }
       if (k === 't') { anchor = startOfDay(new Date()); render(); }
       else if (k === 'arrowleft' || k === 'k' || k === 'p') move(-1);
       else if (k === 'arrowright' || k === 'j' || k === 'n') move(1);
@@ -887,6 +1065,19 @@
     await loadCompleted();
     await loadCached();
     render();
+    if (syncArea && chrome.storage.onChanged) {
+      let st;
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'sync' || writingSync) return;
+        if (!Object.keys(changes).some((k) => k.startsWith(DONE_PREFIX))) return;
+        clearTimeout(st);
+        st = setTimeout(async () => {
+          await loadCompleted();
+          refreshDoneMarks(null);
+          if (popoverState) popoverState.setDoneLabel();
+        }, 200);
+      });
+    }
     if (settings.calendars.length) refreshAll();
   })();
 })();

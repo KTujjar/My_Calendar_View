@@ -208,3 +208,17 @@ main { flex: 1 1 auto; min-height: 0; position: relative; display: flex; }
 .btn.complete:hover { background: color-mix(in srgb, var(--done) 14%, var(--bg)); }
 .btn.complete.is-done { background: var(--done); color: var(--accent-text); }
 .btn.complete.is-done:hover { filter: brightness(1.08); background: var(--done); }
+
+/* Per-day progress */
+.day-head .progress { font-size: 10.5px; color: var(--muted); margin-top: 3px; font-variant-numeric: tabular-nums; min-height: 13px; }
+.day-head .progress.all { color: var(--done); font-weight: 600; }
+.day-head .progress.all::before { content: "✓ "; }
+
+/* Completion pop */
+@keyframes done-pop {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 color-mix(in srgb, var(--done) 60%, transparent); }
+  35% { transform: scale(1.04); }
+  100% { transform: scale(1); box-shadow: 0 0 0 10px transparent; }
+}
+.event.pop, .chip.pop { animation: done-pop .45s ease-out; z-index: 4; }
+@media (prefers-reduced-motion: reduce) { .event.pop, .chip.pop { animation: none; } }
