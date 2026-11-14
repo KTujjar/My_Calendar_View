@@ -6,6 +6,7 @@
   <title>My Calendar</title>
   <link rel="icon" href="icons/icon32.png">
   <link rel="stylesheet" href="view.css">
+  <script src="theme-boot.js"></script>
 </head>
 <body>
   <header class="toolbar">
@@ -20,15 +21,16 @@
     <div class="tb-right">
       <button id="nextUp" class="next-up" hidden></button>
       <span id="status" class="status"></span>
-      <button id="btnRefresh" class="btn icon" title="Refresh (R)" aria-label="Refresh">&#8635;</button>
+      <button id="btnRefresh" class="btn icon" title="Refresh (R)" aria-label="Refresh"><span class="ico" data-ico="refresh">&#8635;</span></button>
       <div class="seg" role="tablist">
         <button id="btnDay" class="seg-btn" title="Day view (D)">Day</button>
         <button id="btnWeek" class="seg-btn" title="Week view (W)">Week</button>
       </div>
       <button id="btnNew" class="btn primary" title="Create an event in Google Calendar">+ New</button>
-      <button id="btnStats" class="btn icon" title="Stats (S)" aria-label="Stats">&#128202;</button>
-      <button id="btnPomo" class="btn pomo-btn" title="Pomodoro timer (F)" aria-label="Pomodoro timer"><span aria-hidden="true">&#127813;</span><span id="pomoBadge"></span></button>
-      <button id="btnSettings" class="btn icon" title="Settings" aria-label="Settings">&#9881;</button>
+      <button id="btnStats" class="btn icon" title="Stats (S)" aria-label="Stats"><span class="ico" data-ico="stats">&#128202;</span></button>
+      <button id="btnPomo" class="btn pomo-btn" title="Pomodoro timer (F)" aria-label="Pomodoro timer"><span class="ico" data-ico="pomo" aria-hidden="true">&#127813;</span><span id="pomoBadge"></span></button>
+      <button id="btnTheme" class="btn icon" title="Themes" aria-label="Themes"><span class="ico" data-ico="theme">&#127912;</span></button>
+      <button id="btnSettings" class="btn icon" title="Settings" aria-label="Settings"><span class="ico" data-ico="settings">&#9881;</span></button>
     </div>
   </header>
 
@@ -123,6 +125,16 @@
     </div>
   </div>
 
+  <div id="themeBackdrop" class="backdrop theme-backdrop" hidden>
+    <div class="dialog theme-dialog" role="dialog" aria-modal="false" aria-labelledby="themeTitle">
+      <div class="dialog-head">
+        <h2 id="themeTitle">Themes</h2>
+        <button id="btnCloseTheme" class="btn icon" aria-label="Close">&#10005;</button>
+      </div>
+      <div id="themeBody"></div>
+    </div>
+  </div>
+
   <div id="statsBackdrop" class="backdrop" hidden>
     <div class="dialog stats-dialog" role="dialog" aria-modal="true" aria-labelledby="statsTitle">
       <div class="dialog-head">
@@ -195,9 +207,11 @@
     </details>
   </aside>
 
+  <script src="bg-engine.js"></script>
   <script src="lib/ical.min.js"></script>
   <script src="view.js"></script>
   <script src="pomodoro.js"></script>
   <script src="stats.js"></script>
+  <script src="themes.js"></script>
 </body>
 </html>

@@ -21,6 +21,20 @@ async function openView() {
 
 chrome.action.onClicked.addListener(openView);
 
+// Re-apply the theme-coloured toolbar icon (saved by themes.js) when Chrome starts.
+async function restoreIcon() {
+  const { actionIcon } = await chrome.storage.local.get('actionIcon');
+  if (!actionIcon) return;
+  const imageData = {};
+  for (const [size, px] of Object.entries(actionIcon)) {
+    const n = Number(size);
+    if (Array.isArray(px) && px.length === n * n * 4) imageData[n] = new ImageData(new Uint8ClampedArray(px), n, n);
+  }
+  if (Object.keys(imageData).length) chrome.action.setIcon({ imageData }).catch(() => {});
+}
+chrome.runtime.onStartup.addListener(restoreIcon);
+chrome.runtime.onInstalled.addListener(restoreIcon);
+
 // Pomodoro: notify when a session ends, even if no calendar tab is open.
 const POMO_TEXT = {
   focus: { title: 'Focus session complete 🍅', short: 'Time for a short break.', long: 'Time for a long break — nice work!' },
