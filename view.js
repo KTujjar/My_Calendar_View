@@ -127,18 +127,34 @@
       try { ICAL.TimezoneService.register(vtz); } catch { /* ignore bad zone */ }
     }
     const masters = new Map();
-    const exceptions = [];
+    const exceptions = new Map(); // `${uid}|${rid utc}` -> newest override
     const events = [];
     for (const ve of comp.getAllSubcomponents('vevent')) {
       let ev;
-      try { ev = new ICAL.Event(ve); } catch { continue; }
-      if (ev.isRecurrenceException()) exceptions.push(ev);
-      else { events.push(ev); if (ev.uid) masters.set(ev.uid, ev); }
+      // Passing `exceptions: []` stops ical.js from auto-attaching EVERY
+      // RECURRENCE-ID event in the calendar to every series (it ignores UID
+      // and matches on time alone, so one series' moved session would replace
+      // another series' occurrence at that time and show up twice).
+      try { ev = new ICAL.Event(ve, { strictExceptions: true, exceptions: [] }); } catch { continue; }
+      if (ev.isRecurrenceException()) {
+        const k = `${ev.uid}|${ridKey(ev.recurrenceId)}`;
+        const prev = exceptions.get(k);
+        if (!prev || seqOf(ev) >= seqOf(prev)) exceptions.set(k, ev);
+      } else {
+        events.push(ev);
+        if (ev.uid) masters.set(ev.uid, ev);
+      }
     }
-    for (const ex of exceptions) {
+    for (const ex of exceptions.values()) {
       const m = masters.get(ex.uid);
       if (m && m.isRecurring()) {
-        try { m.relateException(ex); continue; } catch { /* fall through */ }
+        try {
+          m.relateException(ex);
+          // Also key it by UTC so it still matches if RECURRENCE-ID and the
+          // series' DTSTART are written in different time zones.
+          if (!ex.recurrenceId.isDate) m.exceptions[ridKey(ex.recurrenceId)] = ex;
+          continue;
+        } catch { /* fall through */ }
       }
       events.push(ex);
     }
@@ -149,6 +165,11 @@
       calendarId: calendarIdFromUrl(cal.url),
     };
   }
+
+  function ridKey(t) {
+    return t.isDate ? t.toString() : t.convertToZone(ICAL.Timezone.utcTimezone).toString();
+  }
+  function seqOf(ev) { return Number(ev.component.getFirstPropertyValue('sequence')) || 0; }
 
   function isDeclined(item, calendarId) {
     if (!calendarId) return false;
@@ -206,14 +227,29 @@
           const it = ev.iterator();
           const stopAt = re + 7 * DAY_MS;      // small buffer for moved exceptions
           const skipBefore = rs - 60 * DAY_MS; // occurrences this early can't reach the range
+          const used = new Set();
           let next; let n = 0;
           while ((next = it.next())) {
             if (++n > 50000) break;
             const t = next.toJSDate().getTime();
             if (t >= stopAt) break;
-            if (t < skipBefore) continue;
+            if (t < skipBefore) {
+              // still mark a skipped occurrence's override as handled
+              const ex = ev.exceptions[next.toString()] || ev.exceptions[ridKey(next)];
+              if (ex) used.add(ex);
+              continue;
+            }
             const d = ev.getOccurrenceDetails(next);
+            if (d.item !== ev) used.add(d.item);
             push(d.item, d.startDate, d.endDate, next);
+          }
+          // Overrides whose original slot wasn't generated in the window
+          // (moved in from far away, or the RRULE no longer produces that
+          // date): show them as they are rather than dropping them.
+          for (const ex of new Set(Object.values(ev.exceptions))) {
+            if (!used.has(ex) && ex.recurrenceId.toJSDate().getTime() >= skipBefore) {
+              push(ex, ex.startDate, ex.endDate, ex.recurrenceId);
+            }
           }
         } else {
           push(ev, ev.startDate, ev.endDate, null);
